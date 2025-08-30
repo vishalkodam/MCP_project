@@ -1,5 +1,6 @@
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
+from mcp.server.fastmcp.prompts import base
 # from mcp.types import Tool, Resource, Prompt
 # from typing import Dict, Any
 
@@ -42,8 +43,43 @@ def edit_document(
         raise ValueError(f"Document {doc_id} not found.")
     docs[doc_id] = docs[doc_id].replace(old_string, new_string)
 
+@mcp.resource(
+    "docs://documents",
+    mime_type="application/json",
+)
+def list_docs() -> list[str]:
+    return list(docs.keys())
 
+@mcp.resource(
+    "docs://document/{doc_id}",
+    mime_type="text/plain",
+)
+def fetch_doc(doc_id: str) -> str:
+    if doc_id not in docs:
+        raise ValueError(f"Document {doc_id} not found.")
+    return docs[doc_id]
 
+@mcp.prompt(
+    name="format",
+    description="Rewrites the contents of the document in Markdown format.",
+)
+def format_document(
+    doc_id: str = Field(description="The ID of the document to format."),
+) -> list[base.Message]:
+    prompt = f"""
+    Your goal is to reformat a document to be written with markdown syntax.
 
+    The id of the document you need to reformat is:
+    <document id>
+    {doc_id}
+    </document id>
+
+    Add in headers, bullet points, tables, etc as necessary. Feel free to add in extra whitespace as needed.
+    Use the 'edit_document' tool to make changes to the document as needed. Once you are done, return the updated document.
+    """
+
+    return [
+        base.UserMessage(prompt)
+    ]
 if __name__ == "__main__":
     mcp.run(transport="stdio")

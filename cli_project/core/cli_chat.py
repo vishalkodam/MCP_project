@@ -23,18 +23,18 @@ class CliChat(Chat):
 
     async def list_docs_ids(self) -> list[str]:
         print("Attempting to read documents resource...")
-        result = await self.doc_client.read_resource("documents")
+        result = await self.doc_client.read_resource("docs://documents")
         print(f"Documents resource result: {result}")
-        if result and isinstance(result, dict) and "documents" in result:
-            return result["documents"]
+        if result and isinstance(result, list):
+            return result
         return []
 
     async def get_doc_content(self, doc_id: str) -> str:
         print(f"Attempting to read document content for: {doc_id}")
-        result = await self.doc_client.read_resource(f"document/{doc_id}")
+        result = await self.doc_client.read_resource(f"docs://document/{doc_id}")
         print(f"Document content result: {result}")
-        if result and isinstance(result, dict) and "content" in result:
-            return result["content"]
+        if result and isinstance(result, str):
+            return result
         return f"Document '{doc_id}' not found"
 
     async def get_prompt(
