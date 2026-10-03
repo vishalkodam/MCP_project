@@ -1,115 +1,148 @@
-import sys
-import os
-import asyncio
+"""Async MCP client built on ``fastmcp.Client``.
+
+Spawns a local server script over stdio, or connects to a remote server
+over Streamable HTTP::
+
+    async with MCPClient(script="mcp_server.py") as client:
+        tools = await client.list_tools()
+
+    async with MCPClient(url="http://localhost:8000/mcp") as client:
+        tools = await client.list_tools()
+"""
+
+from __future__ import annotations
+
 import json
-from pydantic import AnyUrl
-from typing import Optional, Any
-from contextlib import AsyncExitStack
-from mcp import ClientSession, StdioServerParameters, types
-from mcp.client.stdio import stdio_client
+import logging
+from pathlib import Path
+from typing import Any, Optional
+
+from fastmcp import Client
+from fastmcp.client.transports import PythonStdioTransport, StreamableHttpTransport
+
+logger = logging.getLogger(__name__)
+
+
+class MCPToolError(RuntimeError):
+    """Raised when a tool call returns an error result."""
+
+
+def _blocks_to_text(content: list[Any]) -> str:
+    """Flatten MCP content blocks into plain text."""
+    parts: list[str] = []
+    for block in content:
+        text = getattr(block, "text", None)
+        if text:
+            parts.append(text)
+        else:
+            data = getattr(block, "data", None)
+            if data is not None:
+                parts.append(json.dumps(data))
+            else:
+                parts.append(f"[{type(block).__name__}]")
+    return "\n".join(parts)
 
 
 class MCPClient:
+    """Thin async wrapper around :class:`fastmcp.Client`."""
+
     def __init__(
         self,
-        command: str,
-        args: list[str],
-        env: Optional[dict] = None,
-    ):
-        self._command = command
-        self._args = args
-        self._env = env
-        self._session: Optional[ClientSession] = None
-        self._exit_stack: AsyncExitStack = AsyncExitStack()
-
-    async def connect(self):
-        server_params = StdioServerParameters(
-            command=self._command,
-            args=self._args,
-            env=self._env,
-        )
-        stdio_transport = await self._exit_stack.enter_async_context(
-            stdio_client(server_params)
-        )
-        _stdio, _write = stdio_transport
-        self._session = await self._exit_stack.enter_async_context(
-            ClientSession(_stdio, _write)
-        )
-        await self._session.initialize()
-
-    def session(self) -> ClientSession:
-        if self._session is None:
-            raise ConnectionError(
-                "Client session not initialized or cache not populated. Call connect_to_server first."
+        script: str | Path | None = None,
+        url: str | None = None,
+        env: Optional[dict[str, str]] = None,
+        cwd: Optional[str | Path] = None,
+    ) -> None:
+        if url:
+            self._transport = StreamableHttpTransport(url)
+            self._label = url
+        elif script is not None:
+            self._transport = PythonStdioTransport(
+                script_path=Path(script),
+                env=env,
+                cwd=str(cwd) if cwd else None,
             )
-        return self._session
+            self._label = str(script)
+        else:
+            raise ValueError("MCPClient needs either a server script or a URL.")
+        self._client: Client | None = None
 
-    async def list_tools(self) -> list[types.Tool]:
-        result = await self.session().list_tools()
-        return result.tools
-
-    async def call_tool(
-        self, tool_name: str, tool_input: dict
-    ) -> types.CallToolResult | None:
-        result = await self.session().call_tool(tool_name, tool_input)
-        return result
-
-    async def list_prompts(self) -> list[types.Prompt]:
-        result = await self.session().list_prompts()
-        return result.prompts
-
-
-    async def get_prompt(self, prompt_name, args: dict[str, str]):
-        result = await self.session().get_prompt(prompt_name, args)
-        return result.messages
-
-    async def read_resource(self, uri: str) -> Any:
-        result = await self.session().read_resource(AnyUrl(uri))
-        resource = result.contents[0]
-        
-        if isinstance(resource, types.TextResourceContents):
-            if resource.mimeType == "application/json":
-                return json.loads(resource.text)
-            return resource.text
-
-    async def cleanup(self):
-        try:
-            if self._session is not None and hasattr(self._session, "close"):
-                maybe_close = self._session.close()
-                if asyncio.iscoroutine(maybe_close):
-                    await maybe_close
-        finally:
-            await self._exit_stack.aclose()
-            self._session = None
-        
-        # On Windows, give transports time to close properly to avoid __del__ warnings
-        if sys.platform == "win32":
-            # Force garbage collection to clean up transport objects
-            import gc
-            gc.collect()
-            await asyncio.sleep(0.1)
-
-    async def __aenter__(self):
+    async def __aenter__(self) -> "MCPClient":
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self.cleanup()
 
+    async def connect(self) -> "MCPClient":
+        """Open the connection to the MCP server."""
+        self._client = Client(self._transport)
+        await self._client.__aenter__()
+        logger.info("Connected to MCP server: %s", self._label)
+        return self
 
-# For testing
-async def main():
-    use_uv = os.getenv("USE_UV", "0") == "1"
-    command, args = ("uv", ["run", "mcp_server.py"]) if use_uv else ("python", ["mcp_server.py"]) 
-    async with MCPClient(
-        command=command,
-        args=args,
-    ) as _client:
-        result = await _client.list_tools()
-        print(result)
+    async def cleanup(self) -> None:
+        """Close the connection to the MCP server."""
+        if self._client is not None:
+            await self._client.__aexit__(None, None, None)
+            self._client = None
+            logger.info("Disconnected from MCP server: %s", self._label)
 
-if __name__ == "__main__":
-    if sys.platform == "win32":
-        # Proactor policy is required for subprocess support on Windows
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    asyncio.run(main())
+    def _require(self) -> Client:
+        if self._client is None:
+            raise ConnectionError(
+                "MCP client is not connected. Use 'async with MCPClient(...)' "
+                "or call connect() first."
+            )
+        return self._client
+
+    async def list_tools(self) -> list[Any]:
+        """List the tools exposed by the server."""
+        return await self._require().list_tools()
+
+    async def call_tool(self, tool_name: str, tool_input: dict[str, Any]) -> str:
+        """Call a tool and return its result as text.
+
+        Raises :class:`MCPToolError` if the server reports a tool error.
+        """
+        try:
+            result = await self._require().call_tool(tool_name, tool_input)
+        except Exception as exc:
+            raise MCPToolError(f"Tool {tool_name} failed: {exc}") from exc
+        text = _blocks_to_text(result.content)
+        if result.is_error:
+            raise MCPToolError(text or f"Tool {tool_name} failed.")
+        # Surface structured output alongside the text when present.
+        if result.structured_content:
+            text = (
+                f"{text}\n{json.dumps(result.structured_content)}"
+                if text
+                else json.dumps(result.structured_content)
+            )
+        return text
+
+    async def list_prompts(self) -> list[Any]:
+        """List the prompts exposed by the server."""
+        return await self._require().list_prompts()
+
+    async def get_prompt(self, prompt_name: str, args: dict[str, str]) -> list[Any]:
+        """Render a server prompt and return its messages."""
+        result = await self._require().get_prompt(prompt_name, args)
+        return result.messages
+
+    async def list_resources(self) -> list[Any]:
+        """List the resources exposed by the server."""
+        return await self._require().list_resources()
+
+    async def read_resource(self, uri: str) -> Any:
+        """Read a resource. JSON resources are parsed, others returned as text."""
+        contents = await self._require().read_resource(uri)
+        if not contents:
+            raise ValueError(f"Resource {uri} returned no content.")
+        resource = contents[0]
+        text = getattr(resource, "text", None)
+        if text is None:
+            raise ValueError(f"Resource {uri} has no text content.")
+        if getattr(resource, "mime_type", None) == "application/json":
+            return json.loads(text)
+        return text

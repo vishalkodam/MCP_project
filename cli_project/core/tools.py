@@ -1,107 +1,108 @@
-import json
-from typing import Optional, Literal, List
-from mcp.types import CallToolResult, Tool, TextContent
-from mcp_client import MCPClient
+"""Bridge between MCP servers and Anthropic's tool-use API.
+
+Collects the tools exposed by every connected MCP server, converts them to
+the shape the Anthropic Messages API expects, and routes the model's
+``tool_use`` requests back to the owning server.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
 from anthropic.types import Message, ToolResultBlockParam
+
+logger = logging.getLogger(__name__)
+
+
+def _tool_schema(tool: Any) -> dict[str, Any]:
+    schema = getattr(tool, "input_schema", None)
+    if not schema:
+        schema = getattr(tool, "inputSchema", None)
+    return schema or {"type": "object", "properties": {}}
 
 
 class ToolManager:
-    @classmethod
-    async def get_all_tools(cls, clients: dict[str, MCPClient]) -> list[Tool]:
-        """Gets all tools from the provided clients."""
-        tools = []
-        for client in clients.values():
-            tool_models = await client.list_tools()
-            tools += [
-                {
-                    "name": t.name,
-                    "description": t.description,
-                    "input_schema": t.inputSchema,
-                }
-                for t in tool_models
-            ]
+    """Maps MCP tools to Anthropic tool definitions and executes tool calls."""
+
+    @staticmethod
+    async def get_all_tools(clients: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return every MCP tool as an Anthropic tool definition."""
+        tools: list[dict[str, Any]] = []
+        for client_id, client in clients.items():
+            for tool in await client.list_tools():
+                tools.append(
+                    {
+                        "name": tool.name,
+                        "description": tool.description or "",
+                        "input_schema": _tool_schema(tool),
+                    }
+                )
+        logger.debug("Collected %d tools from %d MCP client(s).", len(tools), len(clients))
         return tools
 
-    @classmethod
-    async def _find_client_with_tool(
-        cls, clients: list[MCPClient], tool_name: str
-    ) -> Optional[MCPClient]:
-        """Finds the first client that has the specified tool."""
-        for client in clients:
-            tools = await client.list_tools()
-            tool = next((t for t in tools if t.name == tool_name), None)
-            if tool:
-                return client
-        return None
+    @staticmethod
+    async def _owner_map(clients: dict[str, Any]) -> dict[str, Any]:
+        """Map tool name -> the client (server) that provides it."""
+        owners: dict[str, Any] = {}
+        for client_id, client in clients.items():
+            for tool in await client.list_tools():
+                if tool.name in owners:
+                    logger.warning(
+                        "Tool %r provided by multiple servers; using the first one.",
+                        tool.name,
+                    )
+                    continue
+                owners[tool.name] = client
+        return owners
 
-    @classmethod
-    def _build_tool_result_part(
-        cls,
-        tool_use_id: str,
-        text: str,
-        status: Literal["success"] | Literal["error"],
-    ) -> ToolResultBlockParam:
-        """Builds a tool result part dictionary."""
-        return {
-            "tool_use_id": tool_use_id,
-            "type": "tool_result",
-            "content": text,
-            "is_error": status == "error",
-        }
-
-    @classmethod
+    @staticmethod
     async def execute_tool_requests(
-        cls, clients: dict[str, MCPClient], message: Message
-    ) -> List[ToolResultBlockParam]:
-        """Executes a list of tool requests against the provided clients."""
-        tool_requests = [
-            block for block in message.content if block.type == "tool_use"
-        ]
-        tool_result_blocks: list[ToolResultBlockParam] = []
-        for tool_request in tool_requests:
-            tool_use_id = tool_request.id
-            tool_name = tool_request.name
-            tool_input = tool_request.input
+        clients: dict[str, Any], response: Message
+    ) -> list[ToolResultBlockParam]:
+        """Execute every ``tool_use`` block in a model response.
 
-            client = await cls._find_client_with_tool(
-                list(clients.values()), tool_name
-            )
+        Returns Anthropic ``tool_result`` blocks ready to append to the
+        conversation.
+        """
+        owners = await ToolManager._owner_map(clients)
+        results: list[ToolResultBlockParam] = []
 
-            if not client:
-                tool_result_part = cls._build_tool_result_part(
-                    tool_use_id, "Could not find that tool", "error"
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+
+            client = owners.get(block.name)
+            if client is None:
+                results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": f"Unknown tool: {block.name}",
+                        "is_error": True,
+                    }
                 )
-                tool_result_blocks.append(tool_result_part)
                 continue
 
             try:
-                tool_output: CallToolResult | None = await client.call_tool(
-                    tool_name, tool_input
+                logger.info("Calling MCP tool %r with %s", block.name, block.input)
+                text = await client.call_tool(block.name, block.input or {})
+                results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": text,
+                    }
                 )
-                items = []
-                if tool_output:
-                    items = tool_output.content
-                content_list = [
-                    item.text for item in items if isinstance(item, TextContent)
-                ]
-                content_json = json.dumps(content_list)
-                tool_result_part = cls._build_tool_result_part(
-                    tool_use_id,
-                    content_json,
-                    "error"
-                    if tool_output and tool_output.isError
-                    else "success",
-                )
-            except Exception as e:
-                error_message = f"Error executing tool '{tool_name}': {e}"
-                print(error_message)
-                tool_result_part = cls._build_tool_result_part(
-                    tool_use_id,
-                    json.dumps({"error": error_message}),
-                    "error"
-                    if tool_output and tool_output.isError
-                    else "success",
+            except Exception as exc:
+                logger.exception("MCP tool %r failed", block.name)
+                results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": f"Tool {block.name} failed: {exc}",
+                        "is_error": True,
+                    }
                 )
 
-            tool_result_blocks.append(tool_result_part)
-        return tool_result_blocks
+        return results

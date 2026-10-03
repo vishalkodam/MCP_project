@@ -1,52 +1,74 @@
+"""MCP Chat — a CLI for chatting with Claude, powered by MCP document tools."""
+
+import argparse
 import asyncio
-import sys
+import logging
 import os
-from dotenv import load_dotenv
+import sys
 from contextlib import AsyncExitStack
+from pathlib import Path
 
-from mcp_client import MCPClient
+from dotenv import load_dotenv
+
 from core.claude import Claude
-
-from core.cli_chat import CliChat
 from core.cli import CliApp
+from core.cli_chat import CliChat
+from mcp_client import MCPClient
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
-# Anthropic Config
-claude_model = os.getenv("CLAUDE_MODEL", "")
-anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
-
-
-assert claude_model, "Error: CLAUDE_MODEL cannot be empty. Update .env"
-assert anthropic_api_key, (
-    "Error: ANTHROPIC_API_KEY cannot be empty. Update .env"
-)
+BASE_DIR = Path(__file__).resolve().parent
 
 
-async def main():
-    claude_service = Claude(model=claude_model)
-
-    server_scripts = sys.argv[1:]
-    clients = {}
-
-    command, args = (
-        ("uv", ["run", "mcp_server.py"])
-        if os.getenv("USE_UV", "0") == "1"
-        else ("python", ["mcp_server.py"])
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Chat with Claude using MCP document tools.")
+    parser.add_argument(
+        "servers",
+        nargs="*",
+        help="Additional MCP server scripts to connect over stdio.",
     )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default=os.getenv("MCP_TRANSPORT", "stdio"),
+        help="How to reach the document server (default: stdio).",
+    )
+    parser.add_argument(
+        "--server-url",
+        default=os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp"),
+        help="Streamable HTTP URL of the document server (for --transport http).",
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging.")
+    return parser.parse_args()
+
+
+async def amain(args: argparse.Namespace) -> None:
+    load_dotenv()
+
+    model = os.getenv("CLAUDE_MODEL", "")
+    if not model:
+        raise SystemExit("Set CLAUDE_MODEL in your .env file (e.g. CLAUDE_MODEL=claude-sonnet-5).")
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise SystemExit("Set ANTHROPIC_API_KEY in your .env file.")
+
+    claude_service = Claude(model=model)
+    clients: dict[str, MCPClient] = {}
 
     async with AsyncExitStack() as stack:
-        doc_client = await stack.enter_async_context(
-            MCPClient(command=command, args=args)
-        )
-        clients["doc_client"] = doc_client
-
-        for i, server_script in enumerate(server_scripts):
-            client_id = f"client_{i}_{server_script}"
-            client = await stack.enter_async_context(
-                MCPClient(command="uv", args=["run", server_script])
+        if args.transport == "http":
+            logger.info("Connecting to document server at %s", args.server_url)
+            doc_client = await stack.enter_async_context(MCPClient(url=args.server_url))
+        else:
+            server_script = BASE_DIR / "mcp_server.py"
+            logger.info("Spawning document server: %s", server_script)
+            doc_client = await stack.enter_async_context(
+                MCPClient(script=server_script, cwd=BASE_DIR)
             )
-            clients[client_id] = client
+        clients["documents"] = doc_client
+
+        for i, server_script in enumerate(args.servers):
+            client = await stack.enter_async_context(MCPClient(script=server_script))
+            clients[f"server_{i}"] = client
 
         chat = CliChat(
             doc_client=doc_client,
@@ -59,7 +81,16 @@ async def main():
         await cli.run()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    args = parse_args()
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    asyncio.run(main())
+    asyncio.run(amain(args))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,12 +1,36 @@
 [project]
-name = "app"
-version = "0.1.0"
-description = "Add your description here"
+name = "mcp-chat"
+version = "0.2.0"
+description = "CLI chat with Claude, supercharged by MCP document tools"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "anthropic>=0.51.0",
-    "mcp[cli]>=1.8.0",
+    "anthropic>=1.0.0",
+    "fastmcp>=4.0",
     "prompt-toolkit>=3.0.51",
     "python-dotenv>=1.1.0",
+    "pypdf>=4.0.0",
+    "python-docx>=1.1.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

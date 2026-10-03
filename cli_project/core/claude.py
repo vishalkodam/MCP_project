@@ -10,25 +10,19 @@ class Claude:
     def add_user_message(self, messages: list, message):
         user_message = {
             "role": "user",
-            "content": message.content
-            if isinstance(message, Message)
-            else message,
+            "content": message.content if isinstance(message, Message) else message,
         }
         messages.append(user_message)
 
     def add_assistant_message(self, messages: list, message):
         assistant_message = {
             "role": "assistant",
-            "content": message.content
-            if isinstance(message, Message)
-            else message,
+            "content": message.content if isinstance(message, Message) else message,
         }
         messages.append(assistant_message)
 
     def text_from_message(self, message: Message):
-        return "\n".join(
-            [block.text for block in message.content if block.type == "text"]
-        )
+        return "\n".join([block.text for block in message.content if block.type == "text"])
 
     def chat(
         self,

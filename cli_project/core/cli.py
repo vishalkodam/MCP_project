@@ -1,12 +1,13 @@
 from typing import List, Optional
+
 from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.document import Document
+from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
-from prompt_toolkit.history import InMemoryHistory
-from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
-from prompt_toolkit.document import Document
-from prompt_toolkit.buffer import Buffer
 
 from core.cli_chat import CliChat
 
@@ -16,9 +17,7 @@ class CommandAutoSuggest(AutoSuggest):
         self.prompts = prompts
         self.prompt_dict = {prompt.name: prompt for prompt in prompts}
 
-    def get_suggestion(
-        self, buffer: Buffer, document: Document
-    ) -> Optional[Suggestion]:
+    def get_suggestion(self, buffer: Buffer, document: Document) -> Optional[Suggestion]:
         text = document.text
 
         if not text.startswith("/"):
@@ -31,7 +30,9 @@ class CommandAutoSuggest(AutoSuggest):
 
             if cmd in self.prompt_dict:
                 prompt = self.prompt_dict[cmd]
-                return Suggestion(f" {prompt.arguments[0].name}")
+                arguments = getattr(prompt, "arguments", None) or []
+                if arguments:
+                    return Suggestion(f" {arguments[0].name}")
 
         return None
 
@@ -49,6 +50,12 @@ class UnifiedCompleter(Completer):
     def update_resources(self, resources: List):
         self.resources = resources
 
+    @staticmethod
+    def _resource_id(resource) -> str:
+        if isinstance(resource, str):
+            return resource
+        return str(resource.get("id", resource))
+
     def get_completions(self, document, complete_event):
         text = document.text
         text_before_cursor = document.text_before_cursor
@@ -57,7 +64,8 @@ class UnifiedCompleter(Completer):
             last_at_pos = text_before_cursor.rfind("@")
             prefix = text_before_cursor[last_at_pos + 1 :]
 
-            for resource_id in self.resources:
+            for resource in self.resources:
+                resource_id = self._resource_id(resource)
                 if resource_id.lower().startswith(prefix.lower()):
                     yield Completion(
                         resource_id,
@@ -87,11 +95,12 @@ class UnifiedCompleter(Completer):
                 cmd = parts[0]
 
                 if cmd in self.prompt_dict:
-                    for id in self.resources:
+                    for resource in self.resources:
+                        resource_id = self._resource_id(resource)
                         yield Completion(
-                            id,
+                            resource_id,
                             start_position=0,
-                            display=id,
+                            display=resource_id,
                         )
                 return
 
@@ -99,13 +108,12 @@ class UnifiedCompleter(Completer):
                 doc_prefix = parts[-1]
 
                 for resource in self.resources:
-                    if "id" in resource and resource["id"].lower().startswith(
-                        doc_prefix.lower()
-                    ):
+                    resource_id = self._resource_id(resource)
+                    if resource_id.lower().startswith(doc_prefix.lower()):
                         yield Completion(
-                            resource["id"],
+                            resource_id,
                             start_position=-len(doc_prefix),
-                            display=resource["id"],
+                            display=resource_id,
                         )
                 return
 
@@ -152,11 +160,7 @@ class CliApp:
                     buffer.start_completion(select_first=False)
                 elif len(parts) == 2:
                     arg = parts[1]
-                    if (
-                        "doc" in arg.lower()
-                        or "file" in arg.lower()
-                        or "id" in arg.lower()
-                    ):
+                    if "doc" in arg.lower() or "file" in arg.lower() or "id" in arg.lower():
                         buffer.start_completion(select_first=False)
 
         self.history = InMemoryHistory()
