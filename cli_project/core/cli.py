@@ -42,6 +42,7 @@ class UnifiedCompleter(Completer):
         self.prompts = []
         self.prompt_dict = {}
         self.resources = []
+        self.local_commands = {}
 
     def update_prompts(self, prompts: List):
         self.prompts = prompts
@@ -49,6 +50,10 @@ class UnifiedCompleter(Completer):
 
     def update_resources(self, resources: List):
         self.resources = resources
+
+    def update_local_commands(self, local_commands):
+        """Register CLI-local slash commands (name -> description)."""
+        self.local_commands = dict(local_commands)
 
     @staticmethod
     def _resource_id(resource) -> str:
@@ -89,6 +94,15 @@ class UnifiedCompleter(Completer):
                             display=f"/{prompt.name}",
                             display_meta=prompt.description or "",
                         )
+
+                for name, description in self.local_commands.items():
+                    if name.startswith(cmd_prefix):
+                        yield Completion(
+                            name,
+                            start_position=-len(cmd_prefix),
+                            display=f"/{name}",
+                            display_meta=description,
+                        )
                 return
 
             if len(parts) == 1 and text.endswith(" "):
@@ -125,6 +139,7 @@ class CliApp:
         self.prompts = []
 
         self.completer = UnifiedCompleter()
+        self.completer.update_local_commands(CliChat.LOCAL_COMMANDS)
 
         self.command_autosuggester = CommandAutoSuggest([])
 

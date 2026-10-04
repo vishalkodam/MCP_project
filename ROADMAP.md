@@ -6,7 +6,7 @@ run `ruff check`, `ruff format --check`, and `pytest`, then commit.
 
 ## Week 1 — Polish & robustness
 
-- [ ] Day 1: Add a `/clear` chat command that resets the conversation history.
+- [x] Day 1: Add a `/clear` chat command that resets the conversation history.
 - [ ] Day 2: Add a `/tools` chat command listing available MCP tools and descriptions.
 - [ ] Day 3: Stream model responses token-by-token instead of waiting for the full reply.
 - [ ] Day 4: Print token usage and an estimated cost after each turn.

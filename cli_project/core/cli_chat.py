@@ -11,6 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 class CliChat(Chat):
+    #: Slash commands handled locally by the CLI instead of being sent to an
+    #: MCP server as prompts. Maps command name -> description for completion.
+    LOCAL_COMMANDS = {
+        "clear": "Clear the conversation history.",
+    }
+
     def __init__(
         self,
         doc_client: MCPClient,
@@ -68,6 +74,10 @@ class CliChat(Chat):
         words = query.split()
         command = words[0].replace("/", "")
 
+        if command in self.LOCAL_COMMANDS:
+            await self._process_local_command(command)
+            return True
+
         if len(words) < 2:
             print(f"Usage: /{command} <document-id>")
             return True
@@ -80,6 +90,12 @@ class CliChat(Chat):
 
         self.messages += convert_prompt_messages_to_message_params(messages)
         return True
+
+    async def _process_local_command(self, command: str) -> None:
+        """Handle a locally-defined slash command (no server round-trip)."""
+        if command == "clear":
+            self.clear_history()
+            print("Conversation history cleared.")
 
     async def _process_query(self, query: str):
         if await self._process_command(query):

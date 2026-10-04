@@ -17,6 +17,10 @@ class Chat:
         self.messages: list[MessageParam] = []
         self.max_iterations = max_iterations
 
+    def clear_history(self) -> None:
+        """Reset the conversation history, dropping all prior messages."""
+        self.messages = []
+
     async def _process_query(self, query: str):
         self.messages.append({"role": "user", "content": query})
 

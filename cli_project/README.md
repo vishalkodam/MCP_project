@@ -96,6 +96,10 @@ their document argument:
 - `/format <doc>` — ask the model to rewrite a document in clean Markdown
   (it uses the `edit_document` tool to apply changes)
 
+Built-in commands handled by the CLI itself:
+
+- `/clear` — reset the conversation history (no arguments needed)
+
 ### Remote server mode
 
 Serve the document tools over Streamable HTTP for other MCP clients:
