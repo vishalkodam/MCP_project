@@ -15,6 +15,7 @@ class CliChat(Chat):
     #: MCP server as prompts. Maps command name -> description for completion.
     LOCAL_COMMANDS = {
         "clear": "Clear the conversation history.",
+        "tools": "List available MCP tools and their descriptions.",
     }
 
     def __init__(
@@ -96,6 +97,29 @@ class CliChat(Chat):
         if command == "clear":
             self.clear_history()
             print("Conversation history cleared.")
+        elif command == "tools":
+            await self._print_tools()
+
+    async def _print_tools(self) -> None:
+        """Print every available MCP tool, grouped by server, with descriptions."""
+        listed: list[tuple[str, str, str]] = []  # (server_id, tool_name, description)
+        for client_id, client in self.clients.items():
+            try:
+                tools = await client.list_tools()
+            except Exception as exc:
+                logger.warning("Could not list tools from %r: %s", client_id, exc)
+                print(f"  (could not list tools from '{client_id}': {exc})")
+                continue
+            for tool in tools or []:
+                listed.append((client_id, tool.name, tool.description or "(no description)"))
+
+        if not listed:
+            print("No MCP tools available.")
+            return
+
+        print(f"Available MCP tools ({len(listed)}):")
+        for server_id, name, description in listed:
+            print(f"  {name} — {description}  [{server_id}]")
 
     async def _process_query(self, query: str):
         if await self._process_command(query):

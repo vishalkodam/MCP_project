@@ -99,6 +99,8 @@ their document argument:
 Built-in commands handled by the CLI itself:
 
 - `/clear` — reset the conversation history (no arguments needed)
+- `/tools` — list every available MCP tool with its description, grouped by
+  server (no arguments needed)
 
 ### Remote server mode
 
