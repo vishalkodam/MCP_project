@@ -32,16 +32,17 @@ class Chat:
         await self._process_query(query)
 
         for _ in range(self.max_iterations):
-            response = self.claude_service.chat(
+            response = self.claude_service.chat_stream(
                 messages=self.messages,
                 tools=await ToolManager.get_all_tools(self.clients),
                 system=system,
+                on_token=lambda token: print(token, end="", flush=True),
             )
+            print()  # finish the streamed line (text is already on screen)
 
             self.claude_service.add_assistant_message(self.messages, response)
 
             if response.stop_reason == "tool_use":
-                print(self.claude_service.text_from_message(response))
                 tool_result_parts = await ToolManager.execute_tool_requests(self.clients, response)
 
                 self.claude_service.add_user_message(self.messages, tool_result_parts)

@@ -222,8 +222,8 @@ class CliApp:
                 if not user_input.strip():
                     continue
 
-                response = await self.agent.run(user_input)
-                print(f"\nResponse:\n{response}")
+                print("\nResponse:")  # reply streams token-by-token below
+                await self.agent.run(user_input)
 
             except KeyboardInterrupt:
                 break
