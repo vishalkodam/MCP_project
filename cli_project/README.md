@@ -12,6 +12,7 @@ Claude Code, or any other MCP client.
 
 - 💬 Chat with Claude (Anthropic Messages API) from your terminal
 - ⚡ Replies stream token-by-token as the model generates them
+- 📊 Token usage and estimated cost printed after every turn (with session total)
 - 📄 `@doc.md` mentions — inline any document into your question (with Tab completion)
 - ⌨️ `/summarize`, `/format` prompt commands, also Tab-completed
 - 🛠️ MCP tools the model calls on its own: read, edit, and search documents
