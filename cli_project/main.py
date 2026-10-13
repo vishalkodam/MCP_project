@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from core.claude import Claude
 from core.cli import CliApp
 from core.cli_chat import CliChat
+from core.history import HistoryStore
 from mcp_client import MCPClient
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,10 @@ async def amain(args: argparse.Namespace) -> None:
             doc_client=doc_client,
             clients=clients,
             claude_service=claude_service,
+            history_store=HistoryStore(),
         )
+        if chat.messages:
+            print(f"📜 Restored {len(chat.messages)} messages from your last session.")
 
         cli = CliApp(chat)
         await cli.initialize()

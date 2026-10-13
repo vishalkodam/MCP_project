@@ -1,9 +1,14 @@
+import logging
+
 from anthropic.types import MessageParam
 
 from core import usage
 from core.claude import Claude
+from core.history import HistoryStore
 from core.tools import ToolManager
 from mcp_client import MCPClient
+
+logger = logging.getLogger(__name__)
 
 
 class Chat:
@@ -12,6 +17,7 @@ class Chat:
         claude_service: Claude,
         clients: dict[str, MCPClient],
         max_iterations: int = 10,
+        history_store: HistoryStore | None = None,
     ):
         self.claude_service: Claude = claude_service
         self.clients: dict[str, MCPClient] = clients
@@ -19,10 +25,33 @@ class Chat:
         self.max_iterations = max_iterations
         self.session_input_tokens = 0
         self.session_output_tokens = 0
+        self.history_store = history_store
+        if history_store is not None:
+            self.messages = history_store.load()
+            if self.messages:
+                logger.info(
+                    "Restored %d messages from %s",
+                    len(self.messages),
+                    history_store.path,
+                )
 
     def clear_history(self) -> None:
         """Reset the conversation history, dropping all prior messages."""
         self.messages = []
+        self._persist_history()
+
+    def _persist_history(self) -> None:
+        """Write the current messages to the history store, if one is set.
+
+        Persistence is best-effort: a disk failure must never kill the chat,
+        so errors are logged instead of raised.
+        """
+        if self.history_store is None:
+            return
+        try:
+            self.history_store.save(self.messages)
+        except Exception as exc:
+            logger.warning("Could not save conversation history: %s", exc)
 
     async def _process_query(self, query: str):
         self.messages.append({"role": "user", "content": query})
@@ -65,6 +94,8 @@ class Chat:
 
                 self.claude_service.add_user_message(self.messages, tool_result_parts)
             else:
-                return self.claude_service.text_from_message(response)
+                result = self.claude_service.text_from_message(response)
+                self._persist_history()
+                return result
 
         raise RuntimeError(f"Model did not finish within {self.max_iterations} tool iterations.")

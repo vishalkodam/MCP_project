@@ -13,6 +13,7 @@ Claude Code, or any other MCP client.
 - 💬 Chat with Claude (Anthropic Messages API) from your terminal
 - ⚡ Replies stream token-by-token as the model generates them
 - 📊 Token usage and estimated cost printed after every turn (with session total)
+- 💾 Conversation history persists to disk between sessions — `/history` browses it
 - 📄 `@doc.md` mentions — inline any document into your question (with Tab completion)
 - ⌨️ `/summarize`, `/format` prompt commands, also Tab-completed
 - 🛠️ MCP tools the model calls on its own: read, edit, and search documents
@@ -103,6 +104,8 @@ Built-in commands handled by the CLI itself:
 - `/clear` — reset the conversation history (no arguments needed)
 - `/tools` — list every available MCP tool with its description, grouped by
   server (no arguments needed)
+- `/history` — list every turn of the saved conversation (persisted to disk
+  between sessions); `/history N` prints the full text of turn N
 
 ### Remote server mode
 
@@ -143,6 +146,8 @@ cli_project/
 │   ├── cli_chat.py    # @ mentions and / command handling
 │   ├── cli.py         # prompt-toolkit UI: completion, history, keybindings
 │   ├── claude.py      # Anthropic API wrapper
+│   ├── history.py     # conversation history persistence (JSON on disk)
+│   ├── usage.py       # token usage + estimated cost reporting
 │   └── tools.py       # MCP tools <-> Anthropic tool definitions bridge
 ├── docs/              # Your documents live here
 └── tests/             # pytest suite (server, tools, document store)

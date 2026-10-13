@@ -5,9 +5,13 @@ from anthropic.types import MessageParam
 
 from core.chat import Chat
 from core.claude import Claude
+from core.history import HistoryStore
 from mcp_client import MCPClient
 
 logger = logging.getLogger(__name__)
+
+#: Max characters shown per turn in the `/history` listing.
+HISTORY_PREVIEW_LEN = 80
 
 
 class CliChat(Chat):
@@ -16,6 +20,7 @@ class CliChat(Chat):
     LOCAL_COMMANDS = {
         "clear": "Clear the conversation history.",
         "tools": "List available MCP tools and their descriptions.",
+        "history": "Show the saved conversation history.",
     }
 
     def __init__(
@@ -23,8 +28,11 @@ class CliChat(Chat):
         doc_client: MCPClient,
         clients: dict[str, MCPClient],
         claude_service: Claude,
+        history_store: HistoryStore | None = None,
     ):
-        super().__init__(clients=clients, claude_service=claude_service)
+        super().__init__(
+            clients=clients, claude_service=claude_service, history_store=history_store
+        )
 
         self.doc_client: MCPClient = doc_client
 
@@ -76,7 +84,7 @@ class CliChat(Chat):
         command = words[0].replace("/", "")
 
         if command in self.LOCAL_COMMANDS:
-            await self._process_local_command(command)
+            await self._process_local_command(command, words[1:])
             return True
 
         if len(words) < 2:
@@ -92,13 +100,45 @@ class CliChat(Chat):
         self.messages += convert_prompt_messages_to_message_params(messages)
         return True
 
-    async def _process_local_command(self, command: str) -> None:
+    async def _process_local_command(self, command: str, args: list[str]) -> None:
         """Handle a locally-defined slash command (no server round-trip)."""
         if command == "clear":
             self.clear_history()
             print("Conversation history cleared.")
         elif command == "tools":
             await self._print_tools()
+        elif command == "history":
+            self._print_history(args)
+
+    def _print_history(self, args: list[str]) -> None:
+        """Browse the conversation history.
+
+        `/history` lists every turn with a short preview; `/history N` prints
+        the full text of turn N (1-based).
+        """
+        if not self.messages:
+            print("No conversation history yet.")
+            return
+
+        if args:
+            try:
+                index = int(args[0])
+            except ValueError:
+                index = 0
+            if not 1 <= index <= len(self.messages):
+                print(f"Usage: /history [1-{len(self.messages)}]")
+                return
+            message = self.messages[index - 1]
+            print(f"Turn {index} [{message.get('role', '?')}]:")
+            print(message_text(message))
+            return
+
+        print(f"Conversation history ({len(self.messages)} turns):")
+        for i, message in enumerate(self.messages, start=1):
+            preview = message_text(message).replace("\n", " ")
+            if len(preview) > HISTORY_PREVIEW_LEN:
+                preview = preview[: HISTORY_PREVIEW_LEN - 1] + "…"
+            print(f"  #{i} [{message.get('role', '?')}] {preview}")
 
     async def _print_tools(self) -> None:
         """Print every available MCP tool, grouped by server, with descriptions."""
@@ -153,12 +193,53 @@ class CliChat(Chat):
 
 
 def _message_content_to_text(content) -> str:
-    """Extract plain text from an MCP prompt message content object."""
+    """Extract plain text from a message content block.
+
+    Handles plain strings, SDK block objects (``.text`` attribute), and plain
+    dicts as restored from the history file (``{"text": ...}``).
+    """
+    if isinstance(content, dict):
+        text = content.get("text")
+        return text if isinstance(text, str) else ""
     text = getattr(content, "text", None)
     if isinstance(text, str):
         return text
     if isinstance(content, str):
         return content
+    return ""
+
+
+def _block_kind(block) -> str | None:
+    if isinstance(block, dict):
+        return block.get("type")
+    return getattr(block, "type", None)
+
+
+def _tool_block_name(block) -> str:
+    if isinstance(block, dict):
+        return str(block.get("name", "?"))
+    return str(getattr(block, "name", "?"))
+
+
+def message_text(message: MessageParam) -> str:
+    """Plain-text rendering of a conversation message, for `/history`.
+
+    Tool-use blocks (which carry no prose) render as ``[tool: name]`` so the
+    listing still shows what happened on that turn.
+    """
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if _block_kind(block) == "tool_use":
+                parts.append(f"[tool: {_tool_block_name(block)}]")
+                continue
+            text = _message_content_to_text(block)
+            if text:
+                parts.append(text)
+        return "\n".join(parts)
     return ""
 
 
