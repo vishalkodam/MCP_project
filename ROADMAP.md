@@ -14,7 +14,7 @@ run `ruff check`, `ruff format --check`, and `pytest`, then commit.
 
 ## Week 2 — Server features
 
-- [ ] Day 6: Add a `get_doc_stats` tool (word count, size, file type per document).
+- [x] Day 6: Add a `get_doc_stats` tool (word count, size, file type per document).
 - [ ] Day 7: Add an `append_to_doc` tool for appending text to documents.
 - [ ] Day 8: Add regex support to `search_documents` via a `regex: bool` flag.
 - [ ] Day 9: Add an elicitation example — a `create_doc` tool that asks the user

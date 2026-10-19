@@ -54,3 +54,19 @@ def test_creates_docs_dir_if_missing(tmp_path):
     store = DocumentStore(nested)
     assert nested.is_dir()
     assert store.list_ids() == []
+
+
+def test_stats_for_text_document(tmp_path):
+    (tmp_path / "a.md").write_bytes(b"# Hi\nhello world\n")
+    store = DocumentStore(tmp_path)
+    stats = store.stats("a.md")
+    assert stats.doc_id == "a.md"
+    assert stats.file_type == "md"
+    assert stats.size_bytes == (tmp_path / "a.md").stat().st_size
+    assert stats.word_count == 4  # #, Hi, hello, world
+
+
+def test_stats_missing_doc_raises(tmp_path):
+    store = DocumentStore(tmp_path)
+    with pytest.raises(ValueError, match="not found"):
+        store.stats("nope.md")

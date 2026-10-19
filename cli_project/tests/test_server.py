@@ -4,6 +4,8 @@ Uses FastMCP's in-process transport — no subprocesses, no network.
 The server's docs dir is pointed at tests/test_docs by conftest.py.
 """
 
+from pathlib import Path
+
 import pytest
 from fastmcp import Client
 
@@ -13,7 +15,7 @@ from mcp_server import mcp
 async def test_lists_expected_tools():
     async with Client(mcp) as client:
         names = {t.name for t in await client.list_tools()}
-    assert {"read_doc_contents", "edit_document", "search_documents"} <= names
+    assert {"read_doc_contents", "edit_document", "search_documents", "get_doc_stats"} <= names
 
 
 async def test_tool_schemas_have_descriptions():
@@ -63,6 +65,55 @@ async def test_get_prompt_renders():
     assert result.messages
     assert result.messages[0].role == "user"
     assert "hello.md" in result.messages[0].content.text
+
+
+async def test_get_doc_stats_markdown():
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_doc_stats", {"doc_id": "hello.md"})
+    assert not result.is_error
+    stats = result.data
+    assert (stats.doc_id, stats.word_count, stats.size_bytes, stats.file_type) == (
+        "hello.md",
+        7,  # "# Hello\nThis is a test document.\n"
+        33,
+        "md",
+    )
+
+
+async def test_get_doc_stats_text_file():
+    async with Client(mcp) as client:
+        result = await client.call_tool("get_doc_stats", {"doc_id": "data.txt"})
+    assert not result.is_error
+    stats = result.data
+    assert (stats.doc_id, stats.word_count, stats.size_bytes, stats.file_type) == (
+        "data.txt",
+        3,  # "alpha beta gamma"
+        16,
+        "txt",
+    )
+
+
+async def test_get_doc_stats_unreadable_file_still_reports_size_and_type():
+    bin_path = Path(__file__).parent / "test_docs" / "sample.bin"
+    bin_path.write_bytes(b"\xff\xfe\x00binary")
+    try:
+        async with Client(mcp) as client:
+            result = await client.call_tool("get_doc_stats", {"doc_id": "sample.bin"})
+        assert not result.is_error
+        stats = result.data
+        assert stats.word_count == 0
+        assert stats.size_bytes == bin_path.stat().st_size
+        assert stats.file_type == "bin"
+    finally:
+        bin_path.unlink(missing_ok=True)
+
+
+async def test_get_doc_stats_missing_doc_is_tool_error():
+    from fastmcp.exceptions import ToolError
+
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool("get_doc_stats", {"doc_id": "nope.md"})
 
 
 async def test_missing_doc_is_tool_error():

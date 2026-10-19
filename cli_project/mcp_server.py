@@ -69,6 +69,23 @@ class DocumentStore:
         path.write_text(content.replace(old_string, new_string), encoding="utf-8")
         return path.read_text(encoding="utf-8")
 
+    def stats(self, doc_id: str) -> "DocStats":
+        """Return word count, byte size, and file type of a document."""
+        path = self._resolve(doc_id)
+        size_bytes = path.stat().st_size
+        suffix = path.suffix.lower()
+        try:
+            text = self.read(doc_id)
+        except Exception as exc:  # unreadable content — still report size and type
+            logger.debug("Could not extract text from %s: %s", doc_id, exc)
+            text = ""
+        return DocStats(
+            doc_id=doc_id,
+            word_count=len(text.split()),
+            size_bytes=size_bytes,
+            file_type=suffix.lstrip(".") or "unknown",
+        )
+
     def _resolve(self, doc_id: str) -> Path:
         if not doc_id or "/" in doc_id or "\\" in doc_id or doc_id.startswith("."):
             raise ValueError(f"Invalid document id: {doc_id!r}")
@@ -102,6 +119,15 @@ class EditResult(BaseModel):
 
     doc_id: str = Field(description="ID of the edited document.")
     updated_content: str = Field(description="Full updated content of the document.")
+
+
+class DocStats(BaseModel):
+    """Structured result of a get_doc_stats call."""
+
+    doc_id: str = Field(description="ID of the document.")
+    word_count: int = Field(description="Words in the document's extracted text.")
+    size_bytes: int = Field(description="File size on disk, in bytes.")
+    file_type: str = Field(description="File suffix without the dot, e.g. md, txt, pdf.")
 
 
 @mcp.tool()
@@ -138,6 +164,14 @@ def search_documents(
         except Exception as exc:  # unreadable file — skip, don't fail the search
             logger.warning("Skipping %s during search: %s", doc_id, exc)
     return matches
+
+
+@mcp.tool()
+def get_doc_stats(
+    doc_id: str = Field(description="The ID of the document to inspect."),
+) -> DocStats:
+    """Return word count, size in bytes, and file type for a document."""
+    return store.stats(doc_id)
 
 
 @mcp.resource("docs://documents", mime_type="application/json")
