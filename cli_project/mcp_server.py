@@ -69,6 +69,18 @@ class DocumentStore:
         path.write_text(content.replace(old_string, new_string), encoding="utf-8")
         return path.read_text(encoding="utf-8")
 
+    def append(self, doc_id: str, text: str) -> str:
+        """Append ``text`` to the end of a text document, verbatim.
+
+        Returns the updated document content.
+        """
+        path = self._resolve(doc_id)
+        if path.suffix.lower() not in TEXT_SUFFIXES:
+            raise ValueError(f"Appending is only supported for text documents, not {doc_id}")
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(text)
+        return path.read_text(encoding="utf-8")
+
     def stats(self, doc_id: str) -> "DocStats":
         """Return word count, byte size, and file type of a document."""
         path = self._resolve(doc_id)
@@ -121,6 +133,13 @@ class EditResult(BaseModel):
     updated_content: str = Field(description="Full updated content of the document.")
 
 
+class AppendResult(BaseModel):
+    """Structured result of an append_to_doc call."""
+
+    doc_id: str = Field(description="ID of the document appended to.")
+    updated_content: str = Field(description="Full updated content of the document.")
+
+
 class DocStats(BaseModel):
     """Structured result of a get_doc_stats call."""
 
@@ -148,6 +167,15 @@ def edit_document(
 ) -> EditResult:
     """Edit a text document by replacing a string. Returns the updated content."""
     return EditResult(doc_id=doc_id, updated_content=store.edit(doc_id, old_string, new_string))
+
+
+@mcp.tool()
+def append_to_doc(
+    doc_id: str = Field(description="ID of the document to append to."),
+    text: str = Field(description="Text to append to the end of the document, verbatim."),
+) -> AppendResult:
+    """Append text to the end of a text document. Returns the updated content."""
+    return AppendResult(doc_id=doc_id, updated_content=store.append(doc_id, text))
 
 
 @mcp.tool()

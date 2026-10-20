@@ -49,6 +49,27 @@ def test_edit_rejects_binary_types(tmp_path):
         store.edit("doc.pdf", "a", "b")
 
 
+def test_append_to_text_document(tmp_path):
+    (tmp_path / "a.md").write_text("# Title\nhello", encoding="utf-8")
+    store = DocumentStore(tmp_path)
+    updated = store.append("a.md", "\nmore text")
+    assert updated == "# Title\nhello\nmore text"
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == updated
+
+
+def test_append_missing_doc_raises(tmp_path):
+    store = DocumentStore(tmp_path)
+    with pytest.raises(ValueError, match="not found"):
+        store.append("nope.md", "text")
+
+
+def test_append_rejects_binary_types(tmp_path):
+    (tmp_path / "doc.pdf").write_bytes(b"%PDF-1.4 fake")
+    store = DocumentStore(tmp_path)
+    with pytest.raises(ValueError, match="only supported for text"):
+        store.append("doc.pdf", "text")
+
+
 def test_creates_docs_dir_if_missing(tmp_path):
     nested = tmp_path / "docs"
     store = DocumentStore(nested)

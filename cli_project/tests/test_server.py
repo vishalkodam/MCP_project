@@ -15,7 +15,13 @@ from mcp_server import mcp
 async def test_lists_expected_tools():
     async with Client(mcp) as client:
         names = {t.name for t in await client.list_tools()}
-    assert {"read_doc_contents", "edit_document", "search_documents", "get_doc_stats"} <= names
+    assert {
+        "read_doc_contents",
+        "edit_document",
+        "append_to_doc",
+        "search_documents",
+        "get_doc_stats",
+    } <= names
 
 
 async def test_tool_schemas_have_descriptions():
@@ -114,6 +120,30 @@ async def test_get_doc_stats_missing_doc_is_tool_error():
     async with Client(mcp) as client:
         with pytest.raises(ToolError):
             await client.call_tool("get_doc_stats", {"doc_id": "nope.md"})
+
+
+async def test_append_to_doc_roundtrip():
+    append_path = Path(__file__).parent / "test_docs" / "append_me.txt"
+    append_path.write_text("original", encoding="utf-8")
+    try:
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "append_to_doc", {"doc_id": "append_me.txt", "text": "\nappended"}
+            )
+        assert not result.is_error
+        assert result.data.doc_id == "append_me.txt"
+        assert result.data.updated_content == "original\nappended"
+        assert append_path.read_text(encoding="utf-8") == "original\nappended"
+    finally:
+        append_path.unlink(missing_ok=True)
+
+
+async def test_append_to_doc_missing_doc_is_tool_error():
+    from fastmcp.exceptions import ToolError
+
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool("append_to_doc", {"doc_id": "nope.md", "text": "x"})
 
 
 async def test_missing_doc_is_tool_error():
