@@ -16,7 +16,7 @@ Claude Code, or any other MCP client.
 - 💾 Conversation history persists to disk between sessions — `/history` browses it
 - 📄 `@doc.md` mentions — inline any document into your question (with Tab completion)
 - ⌨️ `/summarize`, `/format` prompt commands, also Tab-completed
-- 🛠️ MCP tools the model calls on its own: read, edit, append, search, and inspect (word count / size / type) documents
+- 🛠️ MCP tools the model calls on its own: read, edit, append, search (plain text or regex), and inspect (word count / size / type) documents
 - 📦 Real document parsing: Markdown, text, **PDF**, and **Word** files
 - 🌐 Server runs over **stdio** locally or **Streamable HTTP** for remote clients
 - ✅ Test suite, linting, and CI included

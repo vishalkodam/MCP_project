@@ -46,6 +46,30 @@ async def test_search_documents_finds_match():
     assert "data.txt" in result.data
 
 
+async def test_search_documents_regex_flag_matches_pattern():
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "search_documents", {"query": r"alp.a\s+beta", "regex": True}
+        )
+    assert not result.is_error
+    assert "data.txt" in result.data
+
+
+async def test_search_documents_regex_off_treats_query_as_literal():
+    async with Client(mcp) as client:
+        result = await client.call_tool("search_documents", {"query": r"alp.a\s+beta"})
+    assert not result.is_error
+    assert result.data == []
+
+
+async def test_search_documents_invalid_regex_returns_error():
+    from fastmcp.exceptions import ToolError
+
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool("search_documents", {"query": "(", "regex": True})
+
+
 async def test_documents_resource_lists_ids():
     async with Client(mcp) as client:
         contents = await client.read_resource("docs://documents")

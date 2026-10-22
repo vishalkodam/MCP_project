@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -181,13 +182,26 @@ def append_to_doc(
 @mcp.tool()
 def search_documents(
     query: str = Field(description="Text to search for across all documents."),
+    regex: bool = Field(
+        default=False,
+        description="Treat the query as a regular expression instead of plain text.",
+    ),
 ) -> list[str]:
     """Search every document for a text query. Returns the matching document IDs."""
     matches: list[str] = []
-    needle = query.lower()
+    pattern = None
+    if regex:
+        try:
+            pattern = re.compile(query, re.IGNORECASE)
+        except re.error as exc:
+            raise ValueError(f"Invalid regular expression {query!r}: {exc}") from exc
+        match = lambda text: pattern.search(text) is not None  # noqa: E731
+    else:
+        needle = query.lower()
+        match = lambda text: needle in text.lower()  # noqa: E731
     for doc_id in store.list_ids():
         try:
-            if needle in store.read(doc_id).lower():
+            if match(store.read(doc_id)):
                 matches.append(doc_id)
         except Exception as exc:  # unreadable file — skip, don't fail the search
             logger.warning("Skipping %s during search: %s", doc_id, exc)
