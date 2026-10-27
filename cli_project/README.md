@@ -16,7 +16,7 @@ Claude Code, or any other MCP client.
 - 💾 Conversation history persists to disk between sessions — `/history` browses it
 - 📄 `@doc.md` mentions — inline any document into your question (with Tab completion)
 - ⌨️ `/summarize`, `/format` prompt commands, also Tab-completed
-- 🛠️ MCP tools the model calls on its own: read, edit, append, search (plain text or regex), and inspect (word count / size / type) documents
+- 🛠️ MCP tools the model calls on its own: read, edit, append, create (with a mid-call confirmation prompt), search (plain text or regex), and inspect (word count / size / type) documents
 - 📦 Real document parsing: Markdown, text, **PDF**, and **Word** files
 - 🌐 Server runs over **stdio** locally or **Streamable HTTP** for remote clients
 - ✅ Test suite, linting, and CI included
@@ -106,6 +106,20 @@ Built-in commands handled by the CLI itself:
   server (no arguments needed)
 - `/history` — list every turn of the saved conversation (persisted to disk
   between sessions); `/history N` prints the full text of turn N
+
+### Elicitation: confirming before creating
+
+`create_doc` is an elicitation example: before writing anything, the server
+asks the client mid-call to confirm the file name. The name is validated
+first (invalid names and existing files fail without prompting), and a
+declined, cancelled, or "no" answer creates nothing — the tool just reports
+`created: false`. Clients that don't support elicitation get a tool error.
+
+One protocol wrinkle: the `2026-07-28` era removed the server-initiated
+back-channel, so elicitation only works over a legacy-era connection. An
+in-process FastMCP client opts into that with `Client(mcp, mode="legacy",
+elicitation_handler=...)`, where the handler answers the confirmation
+(a plain `True`/`False`, or an `ElicitResult` for decline/cancel).
 
 ### Remote server mode
 

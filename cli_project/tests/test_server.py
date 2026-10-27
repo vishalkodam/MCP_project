@@ -19,6 +19,7 @@ async def test_lists_expected_tools():
         "read_doc_contents",
         "edit_document",
         "append_to_doc",
+        "create_doc",
         "search_documents",
         "get_doc_stats",
     } <= names
@@ -168,6 +169,89 @@ async def test_append_to_doc_missing_doc_is_tool_error():
     async with Client(mcp) as client:
         with pytest.raises(ToolError):
             await client.call_tool("append_to_doc", {"doc_id": "nope.md", "text": "x"})
+
+
+# --- create_doc (elicitation example) ---
+# Elicitation rides the server-initiated back-channel, which the 2026-07-28
+# protocol era removed — so these tests pin the legacy handshake explicitly.
+
+
+async def _elicit_accept(message, response_type, params, context):
+    return True
+
+
+async def _elicit_decline(message, response_type, params, context):
+    from fastmcp.client.elicitation import ElicitResult
+
+    return ElicitResult(action="decline", content=None)
+
+
+async def _elicit_answer_no(message, response_type, params, context):
+    return False
+
+
+async def _elicit_must_not_run(message, response_type, params, context):
+    raise AssertionError("elicitation must not run for an invalid name")
+
+
+async def test_create_doc_confirmed_creates_file():
+    target = Path(__file__).parent / "test_docs" / "created.md"
+    target.unlink(missing_ok=True)
+    try:
+        async with Client(mcp, mode="legacy", elicitation_handler=_elicit_accept) as client:
+            result = await client.call_tool(
+                "create_doc", {"doc_id": "created.md", "content": "# New\n"}
+            )
+        assert not result.is_error
+        assert result.data.doc_id == "created.md"
+        assert result.data.created is True
+        assert result.data.content == "# New\n"
+        assert target.read_text(encoding="utf-8") == "# New\n"
+    finally:
+        target.unlink(missing_ok=True)
+
+
+async def test_create_doc_declined_creates_nothing():
+    target = Path(__file__).parent / "test_docs" / "declined.md"
+    target.unlink(missing_ok=True)
+    try:
+        async with Client(mcp, mode="legacy", elicitation_handler=_elicit_decline) as client:
+            result = await client.call_tool("create_doc", {"doc_id": "declined.md"})
+        assert not result.is_error
+        assert result.data.created is False
+        assert result.data.content == ""
+        assert not target.exists()
+    finally:
+        target.unlink(missing_ok=True)
+
+
+async def test_create_doc_answered_no_creates_nothing():
+    target = Path(__file__).parent / "test_docs" / "answered_no.md"
+    target.unlink(missing_ok=True)
+    try:
+        async with Client(mcp, mode="legacy", elicitation_handler=_elicit_answer_no) as client:
+            result = await client.call_tool("create_doc", {"doc_id": "answered_no.md"})
+        assert not result.is_error
+        assert result.data.created is False
+        assert not target.exists()
+    finally:
+        target.unlink(missing_ok=True)
+
+
+async def test_create_doc_existing_doc_fails_before_prompting():
+    from fastmcp.exceptions import ToolError
+
+    async with Client(mcp, mode="legacy", elicitation_handler=_elicit_must_not_run) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool("create_doc", {"doc_id": "hello.md"})
+
+
+async def test_create_doc_without_elicitation_support_is_tool_error():
+    from fastmcp.exceptions import ToolError
+
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool("create_doc", {"doc_id": "unsupported.md"})
 
 
 async def test_missing_doc_is_tool_error():

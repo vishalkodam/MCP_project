@@ -20,7 +20,7 @@ import os
 import re
 from pathlib import Path
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -82,6 +82,27 @@ class DocumentStore:
             handle.write(text)
         return path.read_text(encoding="utf-8")
 
+    def validate_new(self, doc_id: str) -> None:
+        """Raise unless ``doc_id`` names a new, creatable text document."""
+        if not doc_id or "/" in doc_id or "\\" in doc_id or doc_id.startswith("."):
+            raise ValueError(f"Invalid document id: {doc_id!r}")
+        path = self.docs_dir / doc_id
+        if path.exists():
+            raise ValueError(f"Document {doc_id} already exists.")
+        if path.suffix.lower() not in TEXT_SUFFIXES:
+            raise ValueError(f"Creating is only supported for text documents, not {doc_id}")
+
+    def create(self, doc_id: str, content: str = "") -> str:
+        """Create a new text document with ``content``.
+
+        Returns the written content. Raises if the id is invalid, the file
+        already exists, or the suffix is not a text type.
+        """
+        self.validate_new(doc_id)
+        path = self.docs_dir / doc_id
+        path.write_text(content, encoding="utf-8")
+        return content
+
     def stats(self, doc_id: str) -> "DocStats":
         """Return word count, byte size, and file type of a document."""
         path = self._resolve(doc_id)
@@ -141,6 +162,14 @@ class AppendResult(BaseModel):
     updated_content: str = Field(description="Full updated content of the document.")
 
 
+class CreateResult(BaseModel):
+    """Structured result of a create_doc call."""
+
+    doc_id: str = Field(description="ID of the document to create.")
+    created: bool = Field(description="True when the document was created.")
+    content: str = Field(description="Content of the created document; empty when not created.")
+
+
 class DocStats(BaseModel):
     """Structured result of a get_doc_stats call."""
 
@@ -177,6 +206,32 @@ def append_to_doc(
 ) -> AppendResult:
     """Append text to the end of a text document. Returns the updated content."""
     return AppendResult(doc_id=doc_id, updated_content=store.append(doc_id, text))
+
+
+@mcp.tool()
+async def create_doc(
+    doc_id: str = Field(description="ID (file name) of the document to create."),
+    content: str = Field(default="", description="Initial content of the document."),
+    *,
+    ctx: Context,  # injected by FastMCP; excluded from the tool schema
+) -> CreateResult:
+    """Create a new text document — but only after the user confirms the name.
+
+    Elicitation example: the server asks the client mid-call to confirm the
+    file name. The name is validated before prompting, so an existing or
+    invalid name fails fast without asking. A declined, cancelled, or
+    negative answer creates nothing and returns ``created=False``. Clients
+    that do not support elicitation get a tool error instead.
+    """
+    store.validate_new(doc_id)
+    result = await ctx.elicit(
+        f"Create a new document named {doc_id!r}?",
+        bool,
+        response_title="Confirm creation",
+    )
+    if result.action != "accept" or not result.data:
+        return CreateResult(doc_id=doc_id, created=False, content="")
+    return CreateResult(doc_id=doc_id, created=True, content=store.create(doc_id, content))
 
 
 @mcp.tool()

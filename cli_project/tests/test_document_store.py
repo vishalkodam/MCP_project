@@ -70,6 +70,30 @@ def test_append_rejects_binary_types(tmp_path):
         store.append("doc.pdf", "text")
 
 
+def test_create_new_text_document(tmp_path):
+    store = DocumentStore(tmp_path)
+    content = store.create("new.md", "# Fresh\n")
+    assert content == "# Fresh\n"
+    assert (tmp_path / "new.md").read_text(encoding="utf-8") == "# Fresh\n"
+    assert store.list_ids() == ["new.md"]
+
+
+def test_create_existing_doc_raises(tmp_path):
+    (tmp_path / "a.md").write_text("old", encoding="utf-8")
+    store = DocumentStore(tmp_path)
+    with pytest.raises(ValueError, match="already exists"):
+        store.create("a.md", "new")
+
+
+def test_create_rejects_binary_types_and_bad_ids(tmp_path):
+    store = DocumentStore(tmp_path)
+    with pytest.raises(ValueError, match="only supported for text"):
+        store.create("doc.pdf", "x")
+    for bad_id in ("../escape.md", ".hidden", ""):
+        with pytest.raises(ValueError, match="Invalid document|already exists"):
+            store.create(bad_id, "x")
+
+
 def test_creates_docs_dir_if_missing(tmp_path):
     nested = tmp_path / "docs"
     store = DocumentStore(nested)
