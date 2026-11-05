@@ -19,7 +19,7 @@ run `ruff check`, `ruff format --check`, and `pytest`, then commit.
 - [x] Day 8: Add regex support to `search_documents` via a `regex: bool` flag.
 - [x] Day 9: Add an elicitation example — a `create_doc` tool that asks the user
   to confirm the file name mid-call.
-- [ ] Day 10: Watch `docs/` for file changes and refresh the resource list live.
+- [x] Day 10: Watch `docs/` for file changes and refresh the resource list live.
 
 ## Week 3 — Client & multi-server
 

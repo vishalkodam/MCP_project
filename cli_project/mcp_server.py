@@ -179,6 +179,59 @@ class DocStats(BaseModel):
     file_type: str = Field(description="File suffix without the dot, e.g. md, txt, pdf.")
 
 
+class DocsChanges(BaseModel):
+    """What changed in ``docs/`` since the last refresh."""
+
+    added: list[str] = Field(description="Documents created since the last refresh.")
+    modified: list[str] = Field(description="Documents changed since the last refresh.")
+    removed: list[str] = Field(description="Documents deleted since the last refresh.")
+    documents: list[str] = Field(description="Current document IDs, sorted.")
+
+
+class DocsWatcher:
+    """Polls a docs directory for file changes, without new dependencies.
+
+    The snapshot maps each visible file name to its ``(mtime_ns, size)``
+    fingerprint — cheap to compute, and size alone catches most edits even
+    when the filesystem timestamp granularity is coarse. The ``docs://``
+    resources already read the directory live on every call, so the watcher
+    exists to *report* what changed, not to make the list itself fresh.
+    """
+
+    def __init__(self, docs_dir: Path = DOCS_DIR) -> None:
+        self.docs_dir = docs_dir
+        self._last = self._snapshot()
+
+    def _snapshot(self) -> dict[str, tuple[int, int]]:
+        if not self.docs_dir.is_dir():
+            return {}
+        fingerprint = {}
+        for path in self.docs_dir.iterdir():
+            if path.is_file() and not path.name.startswith("."):
+                stat = path.stat()
+                fingerprint[path.name] = (stat.st_mtime_ns, stat.st_size)
+        return fingerprint
+
+    def poll(self) -> DocsChanges:
+        """Return changes since the last poll and advance the snapshot."""
+        current = self._snapshot()
+        added = sorted(name for name in current if name not in self._last)
+        removed = sorted(name for name in self._last if name not in current)
+        modified = sorted(
+            name for name in current if name in self._last and current[name] != self._last[name]
+        )
+        self._last = current
+        return DocsChanges(
+            added=added,
+            modified=modified,
+            removed=removed,
+            documents=sorted(current),
+        )
+
+
+watcher = DocsWatcher(store.docs_dir)
+
+
 @mcp.tool()
 def read_doc_contents(
     doc_id: str = Field(description="The ID of the document to read."),
@@ -269,6 +322,18 @@ def get_doc_stats(
 ) -> DocStats:
     """Return word count, size in bytes, and file type for a document."""
     return store.stats(doc_id)
+
+
+@mcp.tool()
+def refresh_docs() -> DocsChanges:
+    """Check ``docs/`` for changes since the last refresh.
+
+    Returns the documents added, modified, or removed since the last call,
+    plus the current document list. The ``docs://documents`` resource itself
+    is already read live from disk on every call; this tool tells a client
+    *what* changed, so it can re-fetch only the affected documents.
+    """
+    return watcher.poll()
 
 
 @mcp.resource("docs://documents", mime_type="application/json")

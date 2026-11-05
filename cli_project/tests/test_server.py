@@ -22,6 +22,7 @@ async def test_lists_expected_tools():
         "create_doc",
         "search_documents",
         "get_doc_stats",
+        "refresh_docs",
     } <= names
 
 
@@ -252,6 +253,29 @@ async def test_create_doc_without_elicitation_support_is_tool_error():
     async with Client(mcp) as client:
         with pytest.raises(ToolError):
             await client.call_tool("create_doc", {"doc_id": "unsupported.md"})
+
+
+async def test_refresh_docs_reports_changes():
+    # Baseline first: flush any changes other tests left behind.
+    watched = Path(__file__).parent / "test_docs" / "watched.md"
+    watched.unlink(missing_ok=True)
+    try:
+        async with Client(mcp) as client:
+            await client.call_tool("refresh_docs", {})
+            watched.write_text("v1", encoding="utf-8")
+            result = await client.call_tool("refresh_docs", {})
+            assert not result.is_error
+            assert result.data.added == ["watched.md"]
+            assert result.data.documents == ["data.txt", "hello.md", "watched.md"]
+            watched.write_text("v1 plus more", encoding="utf-8")
+            result = await client.call_tool("refresh_docs", {})
+            assert result.data.modified == ["watched.md"]
+            watched.unlink()
+            result = await client.call_tool("refresh_docs", {})
+            assert result.data.removed == ["watched.md"]
+            assert result.data.documents == ["data.txt", "hello.md"]
+    finally:
+        watched.unlink(missing_ok=True)
 
 
 async def test_missing_doc_is_tool_error():
