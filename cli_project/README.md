@@ -20,6 +20,7 @@ Claude Code, or any other MCP client.
 - 👀 `refresh_docs` reports what changed in `docs/` (added / modified / removed) since the last check — the `docs://documents` resource itself is already read live from disk on every call
 - 📦 Real document parsing: Markdown, text, **PDF**, and **Word** files
 - 🌐 Server runs over **stdio** locally or **Streamable HTTP** for remote clients
+- 🔁 Server connection retries with exponential backoff when the subprocess fails to spawn (3 retries, starting at 0.5 s)
 - ✅ Test suite, linting, and CI included
 
 ## Tech stack

@@ -12,6 +12,7 @@ over Streamable HTTP::
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -44,7 +45,13 @@ def _blocks_to_text(content: list[Any]) -> str:
 
 
 class MCPClient:
-    """Thin async wrapper around :class:`fastmcp.Client`."""
+    """Thin async wrapper around :class:`fastmcp.Client`.
+
+    ``connect()`` retries with exponential backoff when the server
+    subprocess fails to spawn (or an HTTP endpoint is briefly
+    unreachable): ``max_retries`` extra attempts after the first,
+    waiting ``retry_backoff * 2 ** attempt`` seconds between attempts.
+    """
 
     def __init__(
         self,
@@ -52,20 +59,36 @@ class MCPClient:
         url: str | None = None,
         env: Optional[dict[str, str]] = None,
         cwd: Optional[str | Path] = None,
+        max_retries: int = 3,
+        retry_backoff: float = 0.5,
     ) -> None:
         if url:
-            self._transport = StreamableHttpTransport(url)
+            self._url = url
+            self._script: Path | None = None
             self._label = url
         elif script is not None:
-            self._transport = PythonStdioTransport(
-                script_path=Path(script),
-                env=env,
-                cwd=str(cwd) if cwd else None,
-            )
+            self._url = None
+            self._script = Path(script)
             self._label = str(script)
         else:
             raise ValueError("MCPClient needs either a server script or a URL.")
+        self._env = env
+        self._cwd = cwd
+        self._max_retries = max_retries
+        self._retry_backoff = retry_backoff
+        self._transport = self._make_transport()
         self._client: Client | None = None
+
+    def _make_transport(self) -> PythonStdioTransport | StreamableHttpTransport:
+        """Build a fresh transport (a new subprocess per spawn attempt)."""
+        if self._url:
+            return StreamableHttpTransport(self._url)
+        assert self._script is not None
+        return PythonStdioTransport(
+            script_path=self._script,
+            env=self._env,
+            cwd=str(self._cwd) if self._cwd else None,
+        )
 
     async def __aenter__(self) -> "MCPClient":
         await self.connect()
@@ -75,11 +98,45 @@ class MCPClient:
         await self.cleanup()
 
     async def connect(self) -> "MCPClient":
-        """Open the connection to the MCP server."""
-        self._client = Client(self._transport)
-        await self._client.__aenter__()
-        logger.info("Connected to MCP server: %s", self._label)
-        return self
+        """Open the connection to the MCP server.
+
+        Retries with exponential backoff when the server subprocess fails
+        to spawn (or the HTTP connect fails): ``max_retries`` extra
+        attempts after the first, waiting ``retry_backoff * 2 ** attempt``
+        seconds between attempts. Each attempt builds a fresh transport so
+        a failed spawn never leaves a stale subprocess behind. The last
+        error is re-raised once retries are exhausted.
+        """
+        last_error: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            self._transport = self._make_transport()
+            client = Client(self._transport)
+            try:
+                await client.__aenter__()
+            except Exception as exc:
+                last_error = exc
+                try:
+                    await client.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                if attempt == self._max_retries:
+                    break
+                delay = self._retry_backoff * (2**attempt)
+                logger.warning(
+                    "Connect to %s failed (attempt %d/%d): %s — retrying in %.1fs",
+                    self._label,
+                    attempt + 1,
+                    self._max_retries + 1,
+                    exc,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            self._client = client
+            logger.info("Connected to MCP server: %s", self._label)
+            return self
+        assert last_error is not None
+        raise last_error
 
     async def cleanup(self) -> None:
         """Close the connection to the MCP server."""

@@ -23,7 +23,7 @@ run `ruff check`, `ruff format --check`, and `pytest`, then commit.
 
 ## Week 3 — Client & multi-server
 
-- [ ] Day 11: Retry with backoff when a server subprocess fails to spawn.
+- [x] Day 11: Retry with backoff when a server subprocess fails to spawn.
 - [ ] Day 12: Cache tool schemas per session instead of re-listing every turn.
 - [ ] Day 13: Load extra servers from an `mcp.json` config file (stdio + http entries).
 - [ ] Day 14: Support per-server env vars in the `mcp.json` config.
