@@ -24,7 +24,7 @@ run `ruff check`, `ruff format --check`, and `pytest`, then commit.
 ## Week 3 — Client & multi-server
 
 - [x] Day 11: Retry with backoff when a server subprocess fails to spawn.
-- [ ] Day 12: Cache tool schemas per session instead of re-listing every turn.
+- [x] Day 12: Cache tool schemas per session instead of re-listing every turn.
 - [ ] Day 13: Load extra servers from an `mcp.json` config file (stdio + http entries).
 - [ ] Day 14: Support per-server env vars in the `mcp.json` config.
 - [ ] Day 15: Namespace colliding tool names as `<server>__<tool>` instead of first-wins.
@@ -52,3 +52,4 @@ run `ruff check`, `ruff format --check`, and `pytest`, then commit.
 - [ ] Day 28: Demo progress notifications for a long-running tool.
 - [ ] Day 29: Add a Troubleshooting section to the README from real issues hit.
 - [ ] Day 30: Bump to v0.3.0, write release notes in CHANGELOG.md.
+

@@ -81,3 +81,66 @@ async def test_connect_retries_http_too(monkeypatch):
 def test_client_needs_script_or_url():
     with pytest.raises(ValueError, match="needs either a server script or a URL"):
         MCPClient()
+
+
+def _fake_client_with_tools(monkeypatch, tools):
+    """Fake fastmcp.Client whose list_tools counts calls and is mutable."""
+    state = {"list_calls": 0, "tools": list(tools)}
+
+    class FakeClient:
+        def __init__(self, transport):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            pass
+
+        async def list_tools(self):
+            state["list_calls"] += 1
+            return list(state["tools"])
+
+    monkeypatch.setattr(mcp_client, "Client", FakeClient)
+    return state
+
+
+async def test_list_tools_caches_for_session(monkeypatch):
+    _fake_client_with_tools(monkeypatch, tools=["read_document"])
+    client = MCPClient(script="mcp_server.py")
+    await client.connect()
+    first = await client.list_tools()
+    second = await client.list_tools()
+    assert first == ["read_document"]
+    assert second is first  # same cached list, no second server round-trip
+
+
+async def test_refresh_tools_relists(monkeypatch):
+    state = _fake_client_with_tools(monkeypatch, tools=["read_document"])
+    client = MCPClient(script="mcp_server.py")
+    await client.connect()
+    assert await client.list_tools() == ["read_document"]
+    state["tools"].append("new_tool")
+    # Plain list_tools still serves the cache, refresh picks up the change.
+    assert await client.list_tools() == ["read_document"]
+    assert await client.refresh_tools() == ["read_document", "new_tool"]
+    assert state["list_calls"] == 2
+    assert await client.list_tools() == ["read_document", "new_tool"]
+
+
+async def test_tool_cache_cleared_on_reconnect(monkeypatch):
+    state = _fake_client_with_tools(monkeypatch, tools=["read_document"])
+    client = MCPClient(script="mcp_server.py")
+    await client.connect()
+    await client.list_tools()
+    await client.cleanup()
+    await client.connect()
+    await client.list_tools()
+    assert state["list_calls"] == 2
+
+
+async def test_list_tools_before_connect_raises(monkeypatch):
+    _fake_client_with_tools(monkeypatch, tools=[])
+    client = MCPClient(script="mcp_server.py")
+    with pytest.raises(ConnectionError, match="not connected"):
+        await client.list_tools()

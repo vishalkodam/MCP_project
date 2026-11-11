@@ -51,6 +51,11 @@ class MCPClient:
     subprocess fails to spawn (or an HTTP endpoint is briefly
     unreachable): ``max_retries`` extra attempts after the first,
     waiting ``retry_backoff * 2 ** attempt`` seconds between attempts.
+
+    ``list_tools()`` caches the tool schemas for the session: the server
+    is only asked once, and every later call returns the cached list.
+    Call ``refresh_tools()`` to re-list (e.g. after the server's tools
+    changed); the cache is cleared on ``connect()`` and ``cleanup()``.
     """
 
     def __init__(
@@ -78,6 +83,7 @@ class MCPClient:
         self._retry_backoff = retry_backoff
         self._transport = self._make_transport()
         self._client: Client | None = None
+        self._tools_cache: list[Any] | None = None
 
     def _make_transport(self) -> PythonStdioTransport | StreamableHttpTransport:
         """Build a fresh transport (a new subprocess per spawn attempt)."""
@@ -133,6 +139,7 @@ class MCPClient:
                 await asyncio.sleep(delay)
                 continue
             self._client = client
+            self._tools_cache = None
             logger.info("Connected to MCP server: %s", self._label)
             return self
         assert last_error is not None
@@ -143,6 +150,7 @@ class MCPClient:
         if self._client is not None:
             await self._client.__aexit__(None, None, None)
             self._client = None
+            self._tools_cache = None
             logger.info("Disconnected from MCP server: %s", self._label)
 
     def _require(self) -> Client:
@@ -154,8 +162,20 @@ class MCPClient:
         return self._client
 
     async def list_tools(self) -> list[Any]:
-        """List the tools exposed by the server."""
-        return await self._require().list_tools()
+        """List the tools exposed by the server.
+
+        The schemas are cached for the session: only the first call asks
+        the server, later calls return the cached list. Use
+        :meth:`refresh_tools` to re-list after the server's tools change.
+        """
+        if self._tools_cache is None:
+            self._tools_cache = await self._require().list_tools()
+        return self._tools_cache
+
+    async def refresh_tools(self) -> list[Any]:
+        """Re-list the server's tools and replace the cached schemas."""
+        self._tools_cache = await self._require().list_tools()
+        return self._tools_cache
 
     async def call_tool(self, tool_name: str, tool_input: dict[str, Any]) -> str:
         """Call a tool and return its result as text.

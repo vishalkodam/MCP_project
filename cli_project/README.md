@@ -21,6 +21,7 @@ Claude Code, or any other MCP client.
 - 📦 Real document parsing: Markdown, text, **PDF**, and **Word** files
 - 🌐 Server runs over **stdio** locally or **Streamable HTTP** for remote clients
 - 🔁 Server connection retries with exponential backoff when the subprocess fails to spawn (3 retries, starting at 0.5 s)
+- 🗂️ Tool schemas are cached per session — the server is only asked once per connection, not on every turn (`refresh_tools()` re-lists when tools change)
 - ✅ Test suite, linting, and CI included
 
 ## Tech stack
@@ -210,3 +211,4 @@ push and pull request.
 
 See [ROADMAP.md](../ROADMAP.md) — it's also the backlog for the daily
 improvement commits landing on this repo.
+
