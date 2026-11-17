@@ -6,6 +6,9 @@ over Streamable HTTP::
     async with MCPClient(script="mcp_server.py") as client:
         tools = await client.list_tools()
 
+    async with MCPClient(command="python", args=["other_server.py"]) as client:
+        tools = await client.list_tools()
+
     async with MCPClient(url="http://localhost:8000/mcp") as client:
         tools = await client.list_tools()
 """
@@ -19,7 +22,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastmcp import Client
-from fastmcp.client.transports import PythonStdioTransport, StreamableHttpTransport
+from fastmcp.client.transports import (
+    PythonStdioTransport,
+    StdioTransport,
+    StreamableHttpTransport,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +68,8 @@ class MCPClient:
     def __init__(
         self,
         script: str | Path | None = None,
+        command: str | None = None,
+        args: list[str] | None = None,
         url: str | None = None,
         env: Optional[dict[str, str]] = None,
         cwd: Optional[str | Path] = None,
@@ -70,13 +79,21 @@ class MCPClient:
         if url:
             self._url = url
             self._script: Path | None = None
+            self._command: str | None = None
             self._label = url
+        elif command is not None:
+            self._url = None
+            self._script = None
+            self._command = command
+            self._label = " ".join([command, *(args or [])])
         elif script is not None:
             self._url = None
             self._script = Path(script)
+            self._command = None
             self._label = str(script)
         else:
-            raise ValueError("MCPClient needs either a server script or a URL.")
+            raise ValueError("MCPClient needs a server script, a command, or a URL.")
+        self._args = list(args) if args else []
         self._env = env
         self._cwd = cwd
         self._max_retries = max_retries
@@ -85,10 +102,19 @@ class MCPClient:
         self._client: Client | None = None
         self._tools_cache: list[Any] | None = None
 
-    def _make_transport(self) -> PythonStdioTransport | StreamableHttpTransport:
+    def _make_transport(
+        self,
+    ) -> PythonStdioTransport | StdioTransport | StreamableHttpTransport:
         """Build a fresh transport (a new subprocess per spawn attempt)."""
         if self._url:
             return StreamableHttpTransport(self._url)
+        if self._command is not None:
+            return StdioTransport(
+                command=self._command,
+                args=self._args,
+                env=self._env,
+                cwd=str(self._cwd) if self._cwd else None,
+            )
         assert self._script is not None
         return PythonStdioTransport(
             script_path=self._script,

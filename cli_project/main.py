@@ -14,6 +14,7 @@ from core.claude import Claude
 from core.cli import CliApp
 from core.cli_chat import CliChat
 from core.history import HistoryStore
+from core.servers import client_for, load_servers_config
 from mcp_client import MCPClient
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,12 @@ def parse_args() -> argparse.Namespace:
         "--server-url",
         default=os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp"),
         help="Streamable HTTP URL of the document server (for --transport http).",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to an mcp.json file listing extra MCP servers "
+        "(default: mcp.json next to main.py, if present).",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging.")
     return parser.parse_args()
@@ -67,9 +74,27 @@ async def amain(args: argparse.Namespace) -> None:
             )
         clients["documents"] = doc_client
 
+        config_path = Path(args.config) if args.config else BASE_DIR / "mcp.json"
+        if args.config and not config_path.exists():
+            raise SystemExit(f"Server config not found: {config_path}")
+        try:
+            extra_servers = load_servers_config(config_path)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        for name, config in extra_servers.items():
+            if name in clients:
+                logger.warning("Ignoring config server %r: name already in use.", name)
+                continue
+            logger.info("Connecting to extra server %r from %s", name, config_path)
+            clients[name] = await stack.enter_async_context(client_for(config))
+
         for i, server_script in enumerate(args.servers):
+            name = f"server_{i}"
+            if name in clients:
+                logger.warning("Ignoring command-line server %r: name already in use.", name)
+                continue
             client = await stack.enter_async_context(MCPClient(script=server_script))
-            clients[f"server_{i}"] = client
+            clients[name] = client
 
         chat = CliChat(
             doc_client=doc_client,

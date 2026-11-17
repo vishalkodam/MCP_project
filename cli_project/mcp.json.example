@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "other-server": {
+      "command": "python",
+      "args": [
+        "path/to/other_server.py"
+      ]
+    },
+    "remote-docs": {
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}

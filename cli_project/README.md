@@ -22,6 +22,7 @@ Claude Code, or any other MCP client.
 - 🌐 Server runs over **stdio** locally or **Streamable HTTP** for remote clients
 - 🔁 Server connection retries with exponential backoff when the subprocess fails to spawn (3 retries, starting at 0.5 s)
 - 🗂️ Tool schemas are cached per session — the server is only asked once per connection, not on every turn (`refresh_tools()` re-lists when tools change)
+- 🧩 Extra MCP servers load from `mcp.json` — stdio (`command`/`args`) and Streamable HTTP (`url`) entries connect automatically alongside the document server
 - ✅ Test suite, linting, and CI included
 
 ## Tech stack
@@ -85,6 +86,37 @@ available to the model too:
 ```bash
 python main.py /path/to/other_server.py
 ```
+
+### Multiple servers (`mcp.json`)
+
+For a standing set of extra servers, list them in `mcp.json` (same shape as
+Claude Desktop's `mcpServers` map) — it is picked up automatically, or pass
+`--config` to point at another file:
+
+```bash
+cp mcp.json.example mcp.json
+# edit mcp.json, then just run:
+python main.py
+```
+
+```json
+{
+  "mcpServers": {
+    "other-server": {
+      "command": "python",
+      "args": ["path/to/other_server.py"]
+    },
+    "remote-docs": {
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
+
+A stdio entry needs `command` (plus optional `args`, `env`, `cwd`); an HTTP
+entry needs `url`. Each server is keyed by its name (shown by `/tools`).
+A missing `mcp.json` simply means no extra servers; a malformed one fails
+loudly at startup with a message naming the problem.
 
 ## Usage
 
